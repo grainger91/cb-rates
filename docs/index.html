@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Central Bank Watch</title>
+<style>
+  :root{
+    --bg:#fafaf8; --card:#ffffff; --line:#ececec; --text:#1a1a1a;
+    --muted:#8a8a8a; --accent-bg:#eef3fb; --accent:#185fa5;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f0f0f; --card:#191919; --line:#2a2a2a; --text:#ececec;
+           --muted:#888888; --accent-bg:#15263a; --accent:#6ea8e6; }
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--text);
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+        line-height:1.5; }
+  .wrap{ max-width:880px; margin:0 auto; padding:28px 18px 60px; }
+  h1{ font-size:22px; font-weight:600; margin:0; }
+  .sub{ font-size:13px; color:var(--muted); margin-top:2px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
+  .grid-snap{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:22px 0; }
+  .snap{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .snap .k{ font-size:12px; color:var(--muted); }
+  .snap .v{ font-size:23px; font-weight:600; margin:2px 0; }
+  .snap .d{ font-size:12px; }
+  .ranges{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+  .pill{ font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer;
+         border:1px solid var(--line); background:transparent; color:var(--muted); }
+  .pill.on{ background:var(--accent-bg); color:var(--accent); border-color:transparent; }
+  .legend{ display:flex; flex-wrap:wrap; gap:10px 16px; margin-top:14px; }
+  .lg{ display:flex; align-items:center; gap:7px; background:none; border:none; cursor:pointer; padding:0; }
+  .sw{ width:11px; height:11px; border-radius:3px; }
+  .lg .nm{ font-size:12px; color:var(--text); }
+  .lg .vl{ font-size:12px; color:var(--muted); }
+  .cols{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-top:14px; }
+  select{ font-size:13px; padding:5px 8px; border:1px solid var(--line); border-radius:8px;
+          background:var(--card); color:var(--text); }
+  .cal{ display:flex; flex-direction:column; gap:8px; font-size:13px; }
+  .cal .row{ display:flex; justify-content:space-between; }
+  .cal .row .mt{ color:var(--muted); }
+  .foot{ font-size:12px; color:var(--muted); margin-top:22px; }
+  #wrap-main{ position:relative; }
+  #vline{ position:absolute; top:0; width:1px; background:var(--muted); opacity:0.5; display:none; pointer-events:none; }
+  #tip{ position:absolute; display:none; pointer-events:none; background:var(--card);
+        border:1px solid var(--line); border-radius:8px; padding:7px 9px; font-size:12px;
+        box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:5; min-width:120px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px;">
+    <div>
+      <h1>Central bank watch</h1>
+      <div class="sub" id="sub">loading…</div>
+    </div>
+  </div>
+
+  <div class="grid-snap" id="snap"></div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <div style="font-size:15px; font-weight:600;">Policy rate trajectories</div>
+    </div>
+    <div class="sub" style="margin-bottom:12px;">how the world is moving</div>
+    <div class="ranges" id="ranges"></div>
+    <div id="wrap-main">
+      <div id="chart-main"></div>
+      <div id="vline"></div>
+      <div id="tip"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="cols">
+    <div class="card">
+      <div style="font-size:15px; font-weight:600; margin-bottom:2px;">Divergence</div>
+      <div class="sub" style="margin-bottom:10px;">spread between two banks</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+        <select id="selA"></select>
+        <span style="color:var(--muted);">−</span>
+        <select id="selB"></select>
+      </div>
+      <div id="chart-spread"></div>
+      <div class="sub" id="spread-now" style="margin-top:8px;"></div>
+    </div>
+    <div class="card">
+      <div style="font-size:15px; font-weight:600; margin-bottom:12px;">Next decisions</div>
+      <div class="cal" id="cal"></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    Source: BIS Central Bank Policy Rates (WS_CBPOL). Rates are step series — a level holds until a
+    decision day, then jumps. Meeting calendar is the published 2026 schedule.
+  </div>
+</div>
+
+<script>
+const VBW=640, VBH=260, padL=48, padR=14, padT=14, padB=30;
+const plotW=VBW-padL-padR, plotH=VBH-padT-padB;
+const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const RANGES=["3M","6M","YTD","1Y","2Y","3Y","5Y","10Y","ALL"];
+
+let DATA=null, TODAY=null, todayMs=0;
+let range="2Y";
+let visible=new Set();
+
+function iso(d){ return d.toISOString().slice(0,10); }
+function cutoffFor(r){
+  const t=new Date(TODAY+"T00:00:00Z"), y=t.getUTCFullYear(), m=t.getUTCMonth(), dd=t.getUTCDate();
+  const mk=(yy,mm,d)=>iso(new Date(Date.UTC(yy,mm,d)));
+  if(r==="3M")return mk(y,m-3,dd); if(r==="6M")return mk(y,m-6,dd);
+  if(r==="YTD")return mk(y,0,1); if(r==="1Y")return mk(y-1,m,dd);
+  if(r==="2Y")return mk(y-2,m,dd); if(r==="3Y")return mk(y-3,m,dd);
+  if(r==="5Y")return mk(y-5,m,dd); if(r==="10Y")return mk(y-10,m,dd);
+  return "1900-01-01";
+}
+function valueAt(points,dateStr){ let v=points[0][1]; for(const p of points){ if(p[0]<=dateStr)v=p[1]; else break;} return v; }
+function clip(points,r){
+  if(!points.length) return [];
+  const cut=cutoffFor(r);
+  const start = cut<points[0][0] ? points[0][0] : cut;
+  const out=[[start,valueAt(points,start)]];
+  for(const p of points){ if(p[0]>start && p[0]<=TODAY) out.push([p[0],p[1]]); }
+  const last=out[out.length-1];
+  if(last[0]!==TODAY) out.push([TODAY,last[1]]);
+  return out;
+}
+function windowStartMs(activeKeys){
+  if(range==="ALL"){
+    let mn=Infinity;
+    DATA.banks.forEach(b=>{ if(activeKeys.has(b.key) && b.points.length) mn=Math.min(mn,Date.parse(b.points[0][0])); });
+    return isFinite(mn)?mn:Date.parse("2009-01-01");
+  }
+  return Date.parse(cutoffFor(range));
+}
+
+function drawChart(el, seriesList, x0, x1){
+  let lo=Infinity, hi=-Infinity;
+  seriesList.forEach(s=>s.pts.forEach(p=>{ lo=Math.min(lo,p[1]); hi=Math.max(hi,p[1]); }));
+  if(!isFinite(lo)){ lo=0; hi=1; }
+  const sp=hi-lo, ymin=(sp<0.6?lo-0.5:lo-sp*0.1), ymax=(sp<0.6?hi+0.5:hi+sp*0.1);
+  const dp=(ymax-ymin)<3?2:1;
+  const spanDays=(x1-x0)/86400000;
+  const X=ms=>padL+(ms-x0)/(x1-x0)*plotW;
+  const Y=v=>padT+(ymax-v)/(ymax-ymin)*plotH;
+  let svg=`<svg viewBox="0 0 ${VBW} ${VBH}" width="100%" style="height:auto;display:block" role="img" aria-label="Policy rate chart">`;
+  for(let i=0;i<=4;i++){
+    const v=ymin+(ymax-ymin)*i/4, yy=Y(v);
+    svg+=`<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${VBW-padR}" y2="${yy.toFixed(1)}" stroke="var(--line)" stroke-width="1"/>`;
+    svg+=`<text x="${padL-6}" y="${(yy+3).toFixed(1)}" font-size="10" text-anchor="end" fill="var(--muted)">${v.toFixed(dp)}</text>`;
+  }
+  for(let i=0;i<=4;i++){
+    const ms=x0+(x1-x0)*i/4, xx=X(ms), d=new Date(ms);
+    let lab; if(spanDays>730) lab=""+d.getUTCFullYear();
+    else if(spanDays>120) lab=MON[d.getUTCMonth()]+" '"+String(d.getUTCFullYear()).slice(2);
+    else lab=d.getUTCDate()+" "+MON[d.getUTCMonth()];
+    svg+=`<text x="${xx.toFixed(1)}" y="${VBH-10}" font-size="10" text-anchor="middle" fill="var(--muted)">${lab}</text>`;
+  }
+  seriesList.forEach(s=>{
+    if(!s.pts.length) return;
+    let str="";
+    for(let i=0;i<s.pts.length;i++){
+      const xx=X(Date.parse(s.pts[i][0])), yy=Y(s.pts[i][1]);
+      str+=(i?" ":"")+xx.toFixed(1)+","+yy.toFixed(1);
+      if(i<s.pts.length-1){ const xn=X(Date.parse(s.pts[i+1][0])); str+=" "+xn.toFixed(1)+","+yy.toFixed(1); }
+    }
+    svg+=`<polyline points="${str}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`;
+  });
+  svg+=`</svg>`;
+  el.innerHTML=svg;
+  return {x0,x1};
+}
+
+function renderMain(){
+  const series=DATA.banks.filter(b=>visible.has(b.key)).map(b=>({key:b.key,color:b.color,pts:clip(b.points,range)}));
+  const x0=windowStartMs(visible), x1=todayMs;
+  drawChart(document.getElementById("chart-main"), series, x0, x1);
+  window._mainX0=x0; window._mainX1=x1;
+}
+
+function renderSpread(){
+  const a=DATA.banks.find(b=>b.key===document.getElementById("selA").value);
+  const b=DATA.banks.find(b=>b.key===document.getElementById("selB").value);
+  if(!a||!b||!a.points.length||!b.points.length) return;
+  const x0=Date.parse(range==="ALL"?
+      iso(new Date(Math.max(Date.parse(a.points[0][0]),Date.parse(b.points[0][0])))):cutoffFor(range));
+  const x1=todayMs;
+  const dates=new Set();
+  [a,b].forEach(bk=>bk.points.forEach(p=>{ if(Date.parse(p[0])>=x0 && p[0]<=TODAY) dates.add(p[0]); }));
+  dates.add(iso(new Date(x0))); dates.add(TODAY);
+  const sorted=[...dates].sort();
+  const pts=sorted.map(d=>[d, +(valueAt(a.points,d)-valueAt(b.points,d)).toFixed(2)]);
+  drawChart(document.getElementById("chart-spread"), [{key:"spread",color:"#534ab7",pts}], x0, x1);
+  const now=(valueAt(a.points,TODAY)-valueAt(b.points,TODAY));
+  document.getElementById("spread-now").textContent=
+    `${a.short} − ${b.short} today: ${now>=0?"+":""}${now.toFixed(2)}%`;
+}
+
+function renderRanges(){
+  const el=document.getElementById("ranges"); el.innerHTML="";
+  RANGES.forEach(r=>{
+    const b=document.createElement("button");
+    b.className="pill"+(r===range?" on":""); b.textContent=r;
+    b.onclick=()=>{ range=r; renderRanges(); renderMain(); renderSpread(); };
+    el.appendChild(b);
+  });
+}
+function renderLegend(){
+  const el=document.getElementById("legend"); el.innerHTML="";
+  DATA.banks.forEach(bk=>{
+    if(!bk.points.length) return;
+    const on=visible.has(bk.key), latest=bk.points[bk.points.length-1][1];
+    const btn=document.createElement("button");
+    btn.className="lg"; btn.style.opacity=on?"1":"0.4";
+    btn.innerHTML=`<span class="sw" style="background:${bk.color}"></span><span class="nm">${bk.short}</span><span class="vl">${latest.toFixed(2)}%</span>`;
+    btn.onclick=()=>{ if(on){ if(visible.size>1) visible.delete(bk.key);} else visible.add(bk.key); renderLegend(); renderMain(); };
+    el.appendChild(btn);
+  });
+}
+function renderSnap(){
+  const el=document.getElementById("snap"); el.innerHTML="";
+  DATA.banks.forEach(b=>{
+    if(!b.points.length) return;
+    const lv=b.points[b.points.length-1], prev=b.points.length>1?b.points[b.points.length-2][1]:null;
+    let chg="—", col="var(--muted)";
+    if(prev!==null){ const bps=Math.round((lv[1]-prev)*100); chg=(bps>0?"▲ +":"▼ ")+bps+" bps"; col=bps>0?"#b1521d":"#0f6e56"; }
+    const nm=b.next_meeting?`next ${b.next_meeting.slice(5)}`:"";
+    el.innerHTML+=`<div class="snap"><div class="k">${b.short}</div><div class="v">${lv[1].toFixed(2)}%</div>`
+      +`<div class="d" style="color:${col}">${chg}</div><div class="k" style="margin-top:3px">${nm}</div></div>`;
+  });
+}
+function renderCal(){
+  const el=document.getElementById("cal"); el.innerHTML="";
+  const rows=DATA.banks.filter(b=>b.next_meeting).map(b=>({n:b.name,d:b.next_meeting}))
+    .sort((x,y)=>x.d<y.d?-1:1).slice(0,8);
+  rows.forEach(r=>{
+    const d=new Date(r.d+"T00:00:00Z");
+    el.innerHTML+=`<div class="row"><span>${r.n}</span><span class="mt">${d.getUTCDate()} ${MON[d.getUTCMonth()]}</span></div>`;
+  });
+}
+function fillSelects(){
+  const a=document.getElementById("selA"), b=document.getElementById("selB");
+  DATA.banks.filter(x=>x.points.length).forEach(x=>{
+    a.innerHTML+=`<option value="${x.key}">${x.short}</option>`;
+    b.innerHTML+=`<option value="${x.key}">${x.short}</option>`;
+  });
+  a.value="US"; b.value="CA";
+  a.onchange=renderSpread; b.onchange=renderSpread;
+}
+
+const wrap=document.getElementById("wrap-main");
+const vline=document.getElementById("vline");
+const tip=document.getElementById("tip");
+wrap.addEventListener("mousemove",e=>{
+  try{
+    const svg=document.querySelector("#chart-main svg"); if(!svg) return;
+    const r=svg.getBoundingClientRect();
+    const vbx=(e.clientX-r.left)/r.width*VBW;
+    if(vbx<padL||vbx>VBW-padR){ vline.style.display="none"; tip.style.display="none"; return; }
+    const ms=window._mainX0+(vbx-padL)/plotW*(window._mainX1-window._mainX0);
+    const ds=iso(new Date(ms)), d=new Date(ms);
+    const wr=wrap.getBoundingClientRect(), px=e.clientX-wr.left;
+    vline.style.display="block"; vline.style.left=px+"px";
+    vline.style.height=(r.height*(plotH+padT)/VBH)+"px";
+    let rows=`<div style="color:var(--muted);margin-bottom:4px">${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}</div>`;
+    DATA.banks.filter(b=>visible.has(b.key) && b.points.length).forEach(b=>{
+      const v=valueAt(b.points, ds<b.points[0][0]?b.points[0][0]:ds);
+      rows+=`<div style="display:flex;justify-content:space-between;gap:12px"><span style="color:${b.color}">${b.short}</span><span>${v.toFixed(2)}%</span></div>`;
+    });
+    tip.innerHTML=rows; tip.style.display="block";
+    let tx=px+14; if(tx>wr.width-130) tx=px-130;
+    tip.style.left=Math.max(0,tx)+"px"; tip.style.top="6px";
+  }catch(err){ vline.style.display="none"; tip.style.display="none"; }
+});
+wrap.addEventListener("mouseleave",()=>{ vline.style.display="none"; tip.style.display="none"; });
+
+fetch("./data.json?"+Date.now()).then(r=>r.json()).then(d=>{
+  DATA=d; TODAY=d.generated; todayMs=Date.parse(TODAY);
+  visible=new Set(d.banks.filter(b=>b.points.length).map(b=>b.key));
+  document.getElementById("sub").textContent="policy rates · updated "+d.generated;
+  renderSnap(); renderRanges(); renderLegend(); renderMain(); renderCal(); fillSelects(); renderSpread();
+}).catch(e=>{
+  document.getElementById("sub").textContent="No data yet — run the workflow once to populate it.";
+});
+</script>
+</body>
+</html>
