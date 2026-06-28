@@ -17,6 +17,7 @@ import io
 import csv
 import sys
 import json
+import math
 import smtplib
 import datetime as dt
 from email.mime.multipart import MIMEMultipart
@@ -78,6 +79,8 @@ def parse_sdmx_csv(text):
             v = float(row[val_col])
         except (TypeError, ValueError):
             continue
+        if math.isnan(v) or math.isinf(v):
+            continue
         raw.setdefault(row[area_col], []).append((row[time_col], v))
     return raw
 
@@ -131,7 +134,7 @@ def find_changes(old, new):
 
 
 def fmt_bps(cur, prev):
-    if prev is None:
+    if prev is None or (isinstance(prev, float) and math.isnan(prev)):
         return "new"
     bps = round((cur - prev) * 100)
     return f"{'+' if bps > 0 else ''}{bps} bps"
